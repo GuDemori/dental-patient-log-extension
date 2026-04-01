@@ -1,0 +1,48 @@
+{
+  "name": "dental-patient-log-extension",
+  "displayName": "Dental Patient Log Extension",
+  "version": "0.0.1",
+  "description": "Browser extension for messaging workflows in Dental Patient Log.",
+  "author": "Dental Patient Log Team",
+  "scripts": {
+    "dev": "plasmo dev --target=chrome-mv3",
+    "dev:chrome": "plasmo dev --target=chrome-mv3",
+    "dev:edge": "plasmo dev --target=edge-mv3",
+    "dev:firefox": "plasmo dev --target=firefox-mv3",
+    "dev:safari": "plasmo dev --target=safari-mv3",
+    "build": "plasmo build --target=chrome-mv3",
+    "build:chrome": "plasmo build --target=chrome-mv3",
+    "build:edge": "plasmo build --target=edge-mv3",
+    "build:firefox": "plasmo build --target=firefox-mv3",
+    "build:safari": "plasmo build --target=safari-mv3",
+    "package": "plasmo package --target=chrome-mv3",
+    "package:chrome": "plasmo package --target=chrome-mv3",
+    "package:edge": "plasmo package --target=edge-mv3",
+    "package:firefox": "plasmo package --target=firefox-mv3",
+    "package:safari": "plasmo package --target=safari-mv3"
+  },
+  "dependencies": {
+    "plasmo": "^0.90.5",
+    "react": "18.2.0",
+    "react-dom": "18.2.0"
+  },
+  "devDependencies": {
+    "@ianvs/prettier-plugin-sort-imports": "4.1.1",
+    "@types/chrome": "0.0.258",
+    "@types/firefox-webext-browser": "^120.0.4",
+    "@types/node": "20.11.5",
+    "@types/react": "18.2.48",
+    "@types/react-dom": "18.2.18",
+    "prettier": "3.2.4",
+    "typescript": "5.3.3"
+  },
+  "manifest": {
+    "permissions": [
+      "storage",
+      "tabs"
+    ],
+    "host_permissions": [
+      "https://web.whatsapp.com/*"
+    ]
+  }
+}
