@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 
-import { clearSession, createMessage, fetchMessages, fetchPatients, fetchProcedures, getAccessToken, signIn } from "./api"
+import { clearSession, createMessage, deleteMessage, fetchMessages, fetchPatients, fetchProcedures, getAccessToken, signIn, updateMessage } from "./api"
 import { PAGE_SIZE } from "./constants"
 import { FiltersDropdown } from "./components/FiltersDropdown"
 import { LoginForm } from "./components/LoginForm"
@@ -171,6 +171,16 @@ export const SidebarApp = ({ initialMessage }: SidebarAppProps) => {
     setMessages((prev) => [created, ...prev])
   }
 
+  const handleUpdateMessage = async (id: string, content: string) => {
+    const updated = await updateMessage(id, content)
+    setMessages((prev) => prev.map((message) => (message.id === id ? updated : message)))
+  }
+
+  const handleDeleteMessage = async (id: string) => {
+    await deleteMessage(id)
+    setMessages((prev) => prev.filter((message) => message.id !== id))
+  }
+
   if (!authenticated) {
     return <LoginForm errorMessage={statusMessage} onSubmit={handleLogin} />
   }
@@ -231,6 +241,8 @@ export const SidebarApp = ({ initialMessage }: SidebarAppProps) => {
           loading={loadingMessages}
           statusMessage={messagesStatus}
           onAddMessage={handleCreateMessage}
+          onUpdateMessage={handleUpdateMessage}
+          onDeleteMessage={handleDeleteMessage}
         />
       )}
     </>

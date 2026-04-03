@@ -524,6 +524,12 @@
   color: var(--fg);
 }
 
+.btn.danger {
+  background: #c62828;
+  border-color: #c62828;
+  color: #fff;
+}
+
 .auth-row {
   display: flex;
   justify-content: space-between;
@@ -626,6 +632,8 @@
   border-radius: 8px;
   padding: 8px 10px;
   background: var(--bg);
+  display: grid;
+  gap: 8px;
 }
 
 .message-item-text {
@@ -634,6 +642,95 @@
   font-size: 12px;
   line-height: 1.35;
   white-space: pre-wrap;
+}
+
+.message-item-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.message-action {
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  padding: 0;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.message-action img {
+  width: 14px;
+  height: 14px;
+  object-fit: contain;
+}
+
+.message-action-delete {
+  color: #000;
+}
+
+.message-action-delete .delete-icon-red {
+  display: none;
+}
+
+.message-action-delete:hover,
+.message-action-delete:focus-visible {
+  color: #c62828;
+}
+
+.message-action-delete:hover .delete-icon-black,
+.message-action-delete:focus-visible .delete-icon-black {
+  display: none;
+}
+
+.message-action-delete:hover .delete-icon-red,
+.message-action-delete:focus-visible .delete-icon-red {
+  display: block;
+}
+
+.message-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.28);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999999;
+}
+
+.message-modal {
+  width: min(320px, calc(100vw - 24px));
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+  box-shadow: var(--shadow);
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.message-modal-title {
+  margin: 0;
+  font-size: 14px;
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.message-modal-text {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted-fg);
+}
+
+.message-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .resizer {

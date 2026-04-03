@@ -35,6 +35,17 @@ type MessageCreatePayload = {
   content: string
 }
 
+type MessageUpdatePayload = {
+  accessToken: string
+  id: string
+  content: string
+}
+
+type MessageDeletePayload = {
+  accessToken: string
+  id: string
+}
+
 const buildPatientsUrl = (nameFilter: string, cpfFilter: string, page: number, pageSize: number) => {
   const params = new URLSearchParams()
   params.set("select", "id,name,cpf,city,address,birth_date")
@@ -194,6 +205,46 @@ runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
       const parsed = JSON.parse(text)
       return sendResponse({ ok: true, data: Array.isArray(parsed) ? parsed[0] : parsed })
+    }
+
+    if (message?.type === "MESSAGE_UPDATE") {
+      const { accessToken, id, content } = message.payload as MessageUpdatePayload
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/message_templates?id=eq.${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        headers: {
+          apikey: SUPABASE_PUBLISHABLE_KEY,
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+          Prefer: "return=representation",
+        },
+        body: JSON.stringify({ content: content.trim() }),
+      })
+
+      const text = await response.text()
+      if (!response.ok) {
+        return sendResponse({ ok: false, status: response.status, error: text || `http_${response.status}` })
+      }
+
+      const parsed = JSON.parse(text)
+      return sendResponse({ ok: true, data: Array.isArray(parsed) ? parsed[0] : parsed })
+    }
+
+    if (message?.type === "MESSAGE_DELETE") {
+      const { accessToken, id } = message.payload as MessageDeletePayload
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/message_templates?id=eq.${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers: {
+          apikey: SUPABASE_PUBLISHABLE_KEY,
+          Authorization: `Bearer ${accessToken}`,
+        },
+      })
+
+      const text = await response.text()
+      if (!response.ok) {
+        return sendResponse({ ok: false, status: response.status, error: text || `http_${response.status}` })
+      }
+
+      return sendResponse({ ok: true, data: { id } })
     }
 
     return sendResponse({ ok: false, error: "unknown_message_type" })

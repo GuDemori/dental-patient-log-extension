@@ -176,3 +176,62 @@ export const createMessage = async (content: string): Promise<MessageTemplate> =
     throw error
   }
 }
+
+export const updateMessage = async (id: string, content: string): Promise<MessageTemplate> => {
+  const accessToken = getAccessToken()
+  if (!accessToken) throw new Error("not_authenticated")
+
+  try {
+    return await callBackground<MessageTemplate>("MESSAGE_UPDATE", {
+      accessToken,
+      id,
+      content,
+    })
+  } catch (error) {
+    const status = (error as Error & { status?: number }).status
+    if (status === 401 || status === 403) {
+      const refreshed = await refreshSession()
+      if (!refreshed) {
+        clearSession()
+        throw new Error("unauthorized")
+      }
+      const renewedToken = getAccessToken()
+      if (!renewedToken) throw new Error("unauthorized")
+      return await callBackground<MessageTemplate>("MESSAGE_UPDATE", {
+        accessToken: renewedToken,
+        id,
+        content,
+      })
+    }
+    throw error
+  }
+}
+
+export const deleteMessage = async (id: string): Promise<void> => {
+  const accessToken = getAccessToken()
+  if (!accessToken) throw new Error("not_authenticated")
+
+  try {
+    await callBackground<{ id: string }>("MESSAGE_DELETE", {
+      accessToken,
+      id,
+    })
+  } catch (error) {
+    const status = (error as Error & { status?: number }).status
+    if (status === 401 || status === 403) {
+      const refreshed = await refreshSession()
+      if (!refreshed) {
+        clearSession()
+        throw new Error("unauthorized")
+      }
+      const renewedToken = getAccessToken()
+      if (!renewedToken) throw new Error("unauthorized")
+      await callBackground<{ id: string }>("MESSAGE_DELETE", {
+        accessToken: renewedToken,
+        id,
+      })
+      return
+    }
+    throw error
+  }
+}
