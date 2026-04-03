@@ -2,13 +2,23 @@
 
 Extensao Chrome (Manifest V3) para suportar fluxo de mensagens no WhatsApp Web.
 
-## Bloco 0 (fundacao)
+## Arquitetura Atual
 
-- Base criada com Plasmo + React + TypeScript.
-- Entradas prontas:
-  - `popup.tsx`
-  - `background.ts`
-  - `content.ts` (carrega em `https://web.whatsapp.com/*`)
+- Base com Plasmo + React + TypeScript.
+- Entrada principal no WhatsApp Web:
+  - `content.tsx` (shell da sidebar + mount React)
+- Backend da extensao:
+  - `background.ts` (auth e chamadas da API via runtime message)
+- UI componentizada:
+  - `content/SidebarApp.tsx`
+  - `content/components/LoginForm.tsx`
+  - `content/components/FiltersDropdown.tsx`
+  - `content/components/PatientList.tsx`
+  - `content/components/PatientCard.tsx`
+  - `content/api.ts`
+  - `content/types.ts`
+  - `content/constants.ts`
+  - `content/utils.ts`
 
 ## Requisitos
 
@@ -22,13 +32,6 @@ npm install
 npm run dev:chrome
 ```
 
-Builds de desenvolvimento:
-
-- `build/chrome-mv3-dev`
-- `build/edge-mv3-dev`
-- `build/firefox-mv3-dev`
-- `build/safari-mv3-dev`
-
 Comandos:
 
 ```bash
@@ -37,6 +40,13 @@ npm run dev:edge
 npm run dev:firefox
 npm run dev:safari
 ```
+
+Builds de desenvolvimento:
+
+- `build/chrome-mv3-dev`
+- `build/edge-mv3-dev`
+- `build/firefox-mv3-dev`
+- `build/safari-mv3-dev`
 
 ## Build de producao
 

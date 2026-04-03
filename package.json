@@ -42,7 +42,10 @@
       "tabs"
     ],
     "host_permissions": [
-      "https://web.whatsapp.com/*"
+      "https://web.whatsapp.com/*",
+      "http://127.0.0.1:54321/*",
+      "https://127.0.0.1:54321/*",
+      "https://tecolrvvuvyrzlqlyxcb.supabase.co/*"
     ]
   }
 }
