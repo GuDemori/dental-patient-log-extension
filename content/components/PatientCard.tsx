@@ -1,5 +1,5 @@
 import type { SidebarPatient, SidebarProcedure } from "../types"
-import { formatCurrency, formatDate, formatDocument } from "../utils"
+import { formatCurrency, formatDate, formatDocument, formatPhone } from "../utils"
 import dropdownArrowUrl from "url:../../assets/dropdown-arrow.svg"
 
 type ProcedureState = {
@@ -15,7 +15,8 @@ type PatientCardProps = {
 }
 
 export const PatientCard = ({ patient, expanded, proceduresState, onToggleExpand }: PatientCardProps) => {
-  const documentDisplay = formatDocument(patient.cpf)
+  const documentDisplay = formatDocument(patient.cpf) || "CPF não informado"
+  const phoneDisplay = formatPhone(patient.phone) || "Telefone não informado"
   const locationDisplay = (patient.city || patient.address || "").trim()
   const birthDateDisplay = patient.birth_date ? formatDate(patient.birth_date) : ""
 
@@ -30,6 +31,7 @@ export const PatientCard = ({ patient, expanded, proceduresState, onToggleExpand
           <div className="patient-right-layout">
             <div className="patient-right-meta">
               <p className="patient-meta">{documentDisplay}</p>
+              <p className="patient-meta">{phoneDisplay}</p>
               <p className="patient-meta">{birthDateDisplay}</p>
             </div>
             <button

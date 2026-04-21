@@ -23,10 +23,23 @@ export const formatDocument = (value: string | null | undefined) => {
   return digits
 }
 
+export const formatPhone = (value: string | null | undefined) => {
+  const raw = (value || "").trim()
+  if (!raw) return ""
+  const digits = raw.replace(/\D/g, "")
+  if (!digits) return ""
+  if (digits.length === 11) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7, 11)}`
+  }
+  if (digits.length === 10) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6, 10)}`
+  }
+  return digits
+}
+
 export const formatCurrency = (value: number | null | undefined) =>
   new Intl.NumberFormat("pt-BR", {
     style: "currency",
     currency: "BRL",
     minimumFractionDigits: 2,
   }).format(Number(value || 0))
-
