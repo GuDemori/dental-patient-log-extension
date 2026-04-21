@@ -6,10 +6,12 @@ export type WhatsAppSendErrorCode =
   | "unknown"
 
 const HEADER_SELECTORS = [
-  "header [data-testid='conversation-info-header-chat-title']",
-  "header [data-testid='conversation-header-title']",
-  "header [data-testid='chat-subtitle']",
-  "header span[title]",
+  "#main header [data-testid='conversation-info-header-chat-title']",
+  "#main header [data-testid='conversation-header-title']",
+  "#main header [data-testid='chat-subtitle']",
+  "#main header span[title]",
+  "#main header span[dir='auto']",
+  "#main header div[role='button'] span",
 ]
 
 const INPUT_SELECTORS = [
@@ -32,6 +34,8 @@ const INVALID_MODAL_SELECTORS = [
 
 const LOG_PREFIX = "[dpl][whatsapp-dispatch]"
 
+const IS_DEV = process.env.NODE_ENV !== "production"
+
 const maskPhone = (value: string | null | undefined) => {
   const digits = normalizePhone(value)
   if (!digits) return "n/a"
@@ -47,6 +51,8 @@ const describeElement = (el: HTMLElement | null) => {
 }
 
 const log = (level: "info" | "warn" | "error", event: string, data?: Record<string, unknown>) => {
+  if (level === "info" && !IS_DEV) return
+
   const payload = data ? { ...data, ts: new Date().toISOString() } : { ts: new Date().toISOString() }
   if (level === "error") {
     console.error(`${LOG_PREFIX} ${event}`, payload)
@@ -68,6 +74,22 @@ export const randomDelayMs = (minMs: number, maxMs: number) =>
   Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs
 
 const normalizePhone = (value: string | null | undefined) => (value || "").replace(/\D/g, "")
+
+const isElementVisible = (el: HTMLElement | null) => {
+  if (!el) return false
+  const style = window.getComputedStyle(el)
+  if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) return false
+  const rect = el.getBoundingClientRect()
+  return rect.width > 0 && rect.height > 0
+}
+
+const isActionableSendControl = (el: HTMLElement | null) => {
+  if (!el || !isElementVisible(el)) return false
+  if (el.hasAttribute("disabled")) return false
+  const ariaDisabled = (el.getAttribute("aria-disabled") || "").toLowerCase()
+  if (ariaDisabled === "true") return false
+  return true
+}
 
 export const validatePhoneForSend = (phone: string | null | undefined) => {
   const normalized = normalizePhone(phone)
@@ -185,7 +207,7 @@ const resolveSendButton = (emitLogs = false) => {
   for (const id of SEND_ICON_IDS) {
     const set = getSendButtonSelectorSets(id)
     const normal = queryAnyWithSelector(set.normal)
-    if (normal) {
+    if (normal && isActionableSendControl(normal.found)) {
       if (emitLogs) {
         log("info", "sendButton:resolved-normal", {
           iconId: id,
@@ -200,7 +222,7 @@ const resolveSendButton = (emitLogs = false) => {
   for (const id of SEND_ICON_IDS) {
     const set = getSendButtonSelectorSets(id)
     const business = queryAnyWithSelector(set.business)
-    if (business) {
+    if (business && isActionableSendControl(business.found)) {
       if (emitLogs) {
         log("info", "sendButton:resolved-business", {
           iconId: id,
@@ -220,7 +242,7 @@ const resolveSendButton = (emitLogs = false) => {
     "#main footer [role='button'][aria-label='Enviar']",
     "#main footer [role='button'][aria-label='Send']",
   ])
-  if (direct) {
+  if (direct && isActionableSendControl(direct.found)) {
     if (emitLogs) {
       log("info", "sendButton:resolved-direct", {
         selector: direct.selector,
@@ -237,6 +259,10 @@ const resolveSendButton = (emitLogs = false) => {
   }
 
   const fallback = (icon.closest("button, [role='button']") as HTMLElement | null) || null
+  if (!isActionableSendControl(fallback)) {
+    if (emitLogs) log("warn", "sendButton:fallback-not-actionable")
+    return null
+  }
   if (emitLogs) {
     log("info", "sendButton:resolved-icon-fallback", {
       element: describeElement(fallback),
@@ -250,30 +276,59 @@ const isCorrectChat = (expectedPhone: string) => {
   const current = normalizePhone(headerText)
   const expected = normalizePhone(expectedPhone)
   if (!expected) return false
-  if (!current) return true
+  if (!current) return false
   return current.includes(expected) || expected.includes(current)
 }
 
-const insertText = (input: HTMLElement, text: string) => {
-  input.focus()
-  document.execCommand("selectAll", false)
-  document.execCommand("insertText", false, text)
-  const inputEvent = new InputEvent("input", { bubbles: true, inputType: "insertText", data: text })
-  input.dispatchEvent(inputEvent)
+const normalizeComposerText = (raw: string, targetText: string) => {
+  const current = raw.trim()
+  if (!current || !targetText) return current
+
+  if (current === targetText) return current
+
+  if (current.length % targetText.length === 0) {
+    const times = current.length / targetText.length
+    if (times > 1 && targetText.repeat(times) === current) {
+      return targetText
+    }
+  }
+
+  return current
 }
 
-const buildSendUrl = (phone: string, text: string) => {
+const insertText = (input: HTMLElement, text: string) => {
+  const targetText = text.trim()
+  input.focus()
+
+  const selection = window.getSelection()
+  const range = document.createRange()
+  range.selectNodeContents(input)
+  selection?.removeAllRanges()
+  selection?.addRange(range)
+
+  document.execCommand("insertText", false, targetText)
+
+  const normalized = normalizeComposerText(input.textContent || "", targetText)
+  if (normalized !== targetText) {
+    input.textContent = targetText
+  } else if ((input.textContent || "").trim() !== normalized) {
+    input.textContent = normalized
+  }
+
+  input.dispatchEvent(new Event("input", { bubbles: true }))
+}
+
+const buildSendUrl = (phone: string) => {
   const params = new URLSearchParams()
   params.set("phone", normalizePhone(phone))
-  params.set("text", text)
   params.set("type", "phone_number")
   params.set("app_absent", "0")
   return `${window.location.origin}/send?${params.toString()}`
 }
 
-const ensureChatRoute = (phone: string, text: string) => {
+const ensureChatRoute = (phone: string) => {
   const normalizedPhone = normalizePhone(phone)
-  if (!normalizedPhone) return
+  if (!normalizedPhone) return null
 
   const search = new URLSearchParams(window.location.search)
   const currentPhone = normalizePhone(search.get("phone") || "")
@@ -282,21 +337,78 @@ const ensureChatRoute = (phone: string, text: string) => {
       phone: maskPhone(normalizedPhone),
       pathname: window.location.pathname,
     })
-    return
+    return null
   }
 
-  const targetUrl = buildSendUrl(normalizedPhone, text)
-  log("info", "route:navigate", {
+  const targetUrl = buildSendUrl(normalizedPhone)
+  const previousHeaderText = readHeaderText()
+  log("info", "route:navigate-anchor", {
     fromPathname: window.location.pathname,
     toPathname: "/send",
     phone: maskPhone(normalizedPhone),
-    hasText: Boolean(text),
-    textLength: text.length,
+    previousHeaderText,
   })
-  window.location.assign(targetUrl)
+
+  const anchor = document.createElement("a")
+  anchor.href = targetUrl
+  anchor.target = "_self"
+  anchor.rel = "noopener noreferrer"
+  anchor.style.display = "none"
+  document.body.appendChild(anchor)
+
+  const eventInit: MouseEventInit = { bubbles: true, cancelable: true, view: window, button: 0 }
+  anchor.dispatchEvent(new MouseEvent("mousedown", eventInit))
+  anchor.dispatchEvent(new MouseEvent("mouseup", eventInit))
+  anchor.dispatchEvent(new MouseEvent("click", eventInit))
+  anchor.click()
+
+  anchor.remove()
+  return { targetUrl, previousHeaderText }
 }
 
-const waitForChatRoute = async (phone: string, timeoutMs: number) => {
+const pressEnterToSend = (input: HTMLElement) => {
+  input.focus()
+  const down = new KeyboardEvent("keydown", { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true, cancelable: true })
+  const press = new KeyboardEvent("keypress", { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true, cancelable: true })
+  const up = new KeyboardEvent("keyup", { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true, cancelable: true })
+  input.dispatchEvent(down)
+  input.dispatchEvent(press)
+  input.dispatchEvent(up)
+}
+
+const triggerSendButton = (sendBtn: HTMLElement) => {
+  const eventInit: MouseEventInit = { bubbles: true, cancelable: true, view: window }
+  sendBtn.dispatchEvent(new PointerEvent("pointerdown", { ...eventInit, pointerType: "mouse" }))
+  sendBtn.dispatchEvent(new MouseEvent("mousedown", eventInit))
+  sendBtn.dispatchEvent(new MouseEvent("mouseup", eventInit))
+  sendBtn.dispatchEvent(new PointerEvent("pointerup", { ...eventInit, pointerType: "mouse" }))
+  sendBtn.dispatchEvent(new MouseEvent("click", eventInit))
+  sendBtn.click()
+}
+
+const sendMessageFromInput = async (input: HTMLElement, sendBtn: HTMLElement | null) => {
+  if (sendBtn) {
+    triggerSendButton(sendBtn)
+    await sleep(450)
+  }
+
+  let remaining = (input.textContent || "").trim()
+  if (remaining) {
+    pressEnterToSend(input)
+    await sleep(450)
+    remaining = (input.textContent || "").trim()
+  }
+
+  if (remaining && sendBtn) {
+    triggerSendButton(sendBtn)
+    await sleep(450)
+    remaining = (input.textContent || "").trim()
+  }
+
+  return remaining.length === 0
+}
+
+const waitForChatRoute = async (phone: string, timeoutMs: number, previousHeaderText: string) => {
   const start = Date.now()
   const normalized = normalizePhone(phone)
   log("info", "route:wait-start", {
@@ -306,15 +418,20 @@ const waitForChatRoute = async (phone: string, timeoutMs: number) => {
   while (Date.now() - start < timeoutMs) {
     const search = new URLSearchParams(window.location.search)
     const urlPhone = normalizePhone(search.get("phone") || "")
-    const header = normalizePhone(readHeaderText())
+    const headerText = readHeaderText()
+    const headerDigits = normalizePhone(headerText)
+    const headerChanged = Boolean(headerText) && Boolean(previousHeaderText) && headerText !== previousHeaderText
+
     if (
       (urlPhone && (urlPhone.includes(normalized) || normalized.includes(urlPhone))) ||
-      (header && (header.includes(normalized) || normalized.includes(header)))
+      (headerDigits && (headerDigits.includes(normalized) || normalized.includes(headerDigits))) ||
+      headerChanged
     ) {
       log("info", "route:wait-success", {
         elapsedMs: Date.now() - start,
         urlPhoneLast4: urlPhone.slice(-4),
-        headerHasDigits: Boolean(header),
+        headerHasDigits: Boolean(headerDigits),
+        headerChanged,
       })
       return true
     }
@@ -346,14 +463,15 @@ export const sendWhatsAppMessage = async (
       pathname: window.location.pathname,
     })
 
-    ensureChatRoute(phone, text)
-    const routeOk = await waitForChatRoute(phone, 15000)
+    const routeMeta = ensureChatRoute(phone)
+    const routeOk = await waitForChatRoute(phone, 12000, routeMeta?.previousHeaderText || "")
     if (!routeOk) {
-      log("warn", "send:route-timeout", {
+      log("warn", "send:route-timeout-continue", {
         elapsedMs: Date.now() - startedAt,
+        phone: maskPhone(phone),
       })
-      return { ok: false, code: "timeout", reason: "Tempo esgotado ao abrir conversa do contato." }
     }
+
     const uiBootStart = Date.now()
     while (Date.now() - uiBootStart < 8000) {
       if (document.querySelector(APP_READY_SELECTOR) && !document.querySelector(LOADING_CHAT_SELECTOR)) break
@@ -373,39 +491,56 @@ export const sendWhatsAppMessage = async (
     }
 
     const input = await waitForElement(INPUT_SELECTORS, 10000)
-    const sendBtn = await waitForSendButton(10000)
-    if (!input || !sendBtn) {
+    const sendBtn = await waitForSendButton(6000)
+    if (!input) {
       log("warn", "send:ui-not-ready", {
         hasInput: Boolean(input),
         hasSendButton: Boolean(sendBtn),
         elapsedMs: Date.now() - startedAt,
       })
-      return { ok: false, code: "ui-not-ready", reason: "Input ou botão de envio indisponíveis." }
+      return { ok: false, code: "ui-not-ready", reason: "Campo de mensagem indisponível." }
     }
 
     if (!isCorrectChat(phone)) {
-      log("warn", "send:chat-mismatch", {
+      log("warn", "send:chat-mismatch-continue", {
         phone: maskPhone(phone),
         elapsedMs: Date.now() - startedAt,
       })
-      return { ok: false, code: "chat-mismatch", reason: "Chat aberto não corresponde ao telefone esperado." }
     }
 
-    const content = (input.textContent || "").trim()
-    if (!content) {
+    const targetText = text.trim()
+    const content = normalizeComposerText(input.textContent || "", targetText)
+    if (content !== targetText) {
       log("info", "send:insert-text", {
-        textLength: text.length,
+        textLength: targetText.length,
+        previousLength: content.length,
       })
-      insertText(input, text)
+      insertText(input, targetText)
       await sleep(300)
     }
 
-    log("info", "send:click-button", {
+    const finalContent = normalizeComposerText(input.textContent || "", targetText)
+    if (finalContent !== targetText) {
+      input.textContent = targetText
+      input.dispatchEvent(new Event("input", { bubbles: true }))
+      await sleep(150)
+    }
+
+    log("info", "send:trigger-send", {
       button: describeElement(sendBtn),
       elapsedMs: Date.now() - startedAt,
     })
-    sendBtn.click()
-    await sleep(1000)
+
+    const sent = await sendMessageFromInput(input, sendBtn)
+    if (!sent) {
+      log("warn", "send:not-confirmed", {
+        elapsedMs: Date.now() - startedAt,
+        remainingTextLength: (input.textContent || "").trim().length,
+      })
+      return { ok: false, code: "ui-not-ready", reason: "Mensagem não foi enviada no WhatsApp Web." }
+    }
+
+    await sleep(600)
     log("info", "send:success", {
       elapsedMs: Date.now() - startedAt,
       phone: maskPhone(phone),
