@@ -70,18 +70,33 @@ export const signIn = async (email: string, password: string) => {
   saveSession(payload.access_token, payload.refresh_token, payload.user?.email)
 }
 
-export const fetchPatients = async (nameFilter: string, cpfFilter: string, page: number): Promise<PatientsPageResult> => {
+export type PatientsFiltersInput = {
+  name: string
+  document: string
+  dynamicMode: "none" | "no_return" | "next_scheduled" | "today_scheduled"
+  absenceYears: string
+  absenceMonths: string
+  nextConsultWeeks: string
+}
+
+const buildPatientsPayload = (accessToken: string, filters: PatientsFiltersInput, page: number) => ({
+  accessToken,
+  nameFilter: filters.name,
+  cpfFilter: filters.document,
+  filterMode: filters.dynamicMode,
+  absenceYears: Number.parseInt(filters.absenceYears || "0", 10) || 0,
+  absenceMonths: Number.parseInt(filters.absenceMonths || "0", 10) || 0,
+  nextConsultWeeks: Number.parseInt(filters.nextConsultWeeks || "0", 10) || 0,
+  page,
+  pageSize: PAGE_SIZE,
+})
+
+export const fetchPatients = async (filters: PatientsFiltersInput, page: number): Promise<PatientsPageResult> => {
   const accessToken = getAccessToken()
   if (!accessToken) throw new Error("not_authenticated")
 
   try {
-    return await callBackground<PatientsPageResult>("PATIENTS_FETCH", {
-      accessToken,
-      nameFilter,
-      cpfFilter,
-      page,
-      pageSize: PAGE_SIZE,
-    })
+    return await callBackground<PatientsPageResult>("PATIENTS_FETCH", buildPatientsPayload(accessToken, filters, page))
   } catch (error) {
     const status = (error as Error & { status?: number }).status
     if (status === 401 || status === 403) {
@@ -93,13 +108,7 @@ export const fetchPatients = async (nameFilter: string, cpfFilter: string, page:
       const renewedToken = getAccessToken()
       if (!renewedToken) throw new Error("unauthorized")
 
-      return await callBackground<PatientsPageResult>("PATIENTS_FETCH", {
-        accessToken: renewedToken,
-        nameFilter,
-        cpfFilter,
-        page,
-        pageSize: PAGE_SIZE,
-      })
+      return await callBackground<PatientsPageResult>("PATIENTS_FETCH", buildPatientsPayload(renewedToken, filters, page))
     }
     throw error
   }

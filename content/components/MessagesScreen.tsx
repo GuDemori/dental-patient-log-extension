@@ -1,8 +1,14 @@
 import type { DispatchRunProgress, MessageTemplate } from "../types"
-import { useState } from "react"
+import { useRef, useState } from "react"
 import deleteBlackUrl from "url:../../assets/black-delete.svg"
 import deleteRedUrl from "url:../../assets/red-delete.svg"
 import editIconUrl from "url:../../assets/edit.svg"
+
+const MESSAGE_PARAMS = [
+  { key: "nome", token: "{{nome}}", description: "Nome completo do paciente" },
+  { key: "primeiro_nome", token: "{{primeiro_nome}}", description: "Primeiro nome do paciente" },
+  { key: "data_consulta", token: "{{data_consulta}}", description: "Data da próxima consulta (dd/mm/aaaa)" },
+]
 
 type MessagesScreenProps = {
   messages: MessageTemplate[]
@@ -43,6 +49,7 @@ export const MessagesScreen = ({
   const [deleteTarget, setDeleteTarget] = useState<MessageTemplate | null>(null)
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 
   const handleCancel = () => {
     setCreating(false)
@@ -78,6 +85,27 @@ export const MessagesScreen = ({
     setEditingId(message.id)
     setDraft(message.content)
     setCreating(true)
+  }
+
+  const handleInsertParam = (token: string) => {
+    const textarea = textareaRef.current
+    if (!textarea) {
+      setDraft((prev) => `${prev}${token}`)
+      return
+    }
+
+    const start = textarea.selectionStart ?? draft.length
+    const end = textarea.selectionEnd ?? draft.length
+    const next = `${draft.slice(0, start)}${token}${draft.slice(end)}`
+    const nextCaret = start + token.length
+    setDraft(next)
+
+    requestAnimationFrame(() => {
+      const target = textareaRef.current
+      if (!target) return
+      target.focus()
+      target.setSelectionRange(nextCaret, nextCaret)
+    })
   }
 
   const confirmDelete = async () => {
@@ -118,7 +146,7 @@ export const MessagesScreen = ({
             <option value="">Selecione...</option>
             {messages.map((template) => (
               <option value={template.id} key={template.id}>
-                {template.content.slice(0, 80)}
+                {template.content}
               </option>
             ))}
           </select>
@@ -146,11 +174,27 @@ export const MessagesScreen = ({
       {creating ? (
         <div className="message-editor">
           <textarea
+            ref={textareaRef}
             className="message-textarea"
             placeholder="Digite a mensagem..."
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
           />
+          <div className="message-params">
+            <span className="message-params-label">Parâmetros:</span>
+            <div className="message-params-list">
+              {MESSAGE_PARAMS.map((param) => (
+                <button
+                  key={param.key}
+                  type="button"
+                  className="message-param-chip"
+                  title={param.description}
+                  onClick={() => handleInsertParam(param.token)}>
+                  {param.token}
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="message-editor-actions">
             <button className="btn secondary" type="button" onClick={handleCancel}>
               Cancelar

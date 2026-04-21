@@ -23,6 +23,10 @@ type PatientsPayload = {
   accessToken: string
   nameFilter: string
   cpfFilter: string
+  filterMode?: "none" | "no_return" | "next_scheduled" | "today_scheduled"
+  absenceYears?: number
+  absenceMonths?: number
+  nextConsultWeeks?: number
   page: number
   pageSize: number
 }
@@ -99,18 +103,104 @@ const isValidPhone = (value: string | null | undefined) => {
   return normalized.length >= 10 && normalized.length <= 15
 }
 
-const buildPatientsUrl = (nameFilter: string, cpfFilter: string, page: number, pageSize: number) => {
+const buildPatientsBaseUrl = (nameFilter: string, cpfFilter: string) => {
   const params = new URLSearchParams()
   params.set("select", "id,name,cpf,phone,city,address,birth_date")
   params.set("order", "name.asc")
-  params.set("limit", String(pageSize))
-  params.set("offset", String((Math.max(1, page) - 1) * pageSize))
+  params.set("limit", "5000")
+  params.set("offset", "0")
 
   if (nameFilter.trim()) params.set("name", `ilike.*${nameFilter.trim()}*`)
   if (cpfFilter.trim()) params.set("cpf", `ilike.*${cpfFilter.trim()}*`)
 
   return `${SUPABASE_URL}/rest/v1/patients?${params.toString()}`
 }
+
+const buildProceduresByPatientsUrl = (patientIds: string[]) => {
+  const params = new URLSearchParams()
+  params.set("select", "patient_id,date")
+  params.set("order", "date.asc")
+  params.set("limit", "5000")
+  params.set("patient_id", `in.(${patientIds.map((id) => id.replaceAll(",", "")).join(",")})`)
+  return `${SUPABASE_URL}/rest/v1/procedures?${params.toString()}`
+}
+
+const chunk = <T,>(items: T[], size: number) => {
+  const result: T[][] = []
+  for (let index = 0; index < items.length; index += size) {
+    result.push(items.slice(index, index + size))
+  }
+  return result
+}
+
+type DateParts = {
+  year: number
+  month: number
+  day: number
+  key: string
+}
+
+const parseDateParts = (value: string | null | undefined): DateParts | null => {
+  if (!value) return null
+  const match = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (!match) return null
+  const year = Number.parseInt(match[1], 10)
+  const month = Number.parseInt(match[2], 10)
+  const day = Number.parseInt(match[3], 10)
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null
+  const key = `${match[1]}-${match[2]}-${match[3]}`
+  return { year, month, day, key }
+}
+
+const getTodayInBrasilia = (): DateParts => {
+  const now = new Date()
+  const formatted = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now)
+  const parsed = parseDateParts(formatted)
+  if (!parsed) {
+    const fallbackYear = now.getUTCFullYear()
+    const fallbackMonth = String(now.getUTCMonth() + 1).padStart(2, "0")
+    const fallbackDay = String(now.getUTCDate()).padStart(2, "0")
+    const fallbackKey = `${fallbackYear}-${fallbackMonth}-${fallbackDay}`
+    return { year: fallbackYear, month: Number(fallbackMonth), day: Number(fallbackDay), key: fallbackKey }
+  }
+  return parsed
+}
+
+const monthsSinceDate = (fromDate: DateParts, toDate: DateParts) => {
+  let months = (toDate.year - fromDate.year) * 12 + (toDate.month - fromDate.month)
+  if (toDate.day < fromDate.day) months -= 1
+  return Math.max(0, months)
+}
+
+const formatDateBr = (dateKey: string | null | undefined) => {
+  if (!dateKey) return ""
+  const parsed = parseDateParts(dateKey)
+  if (!parsed) return ""
+  return `${String(parsed.day).padStart(2, "0")}/${String(parsed.month).padStart(2, "0")}/${parsed.year}`
+}
+
+const getFirstName = (fullName: string | null | undefined) => {
+  const clean = (fullName || "").trim()
+  if (!clean) return ""
+  const [first] = clean.split(/\s+/)
+  return first || ""
+}
+
+const renderMessageTemplate = (
+  template: string,
+  params: { nome: string; primeiro_nome: string; data_consulta: string }
+) =>
+  template
+    .replace(/\{\{\s*nome\s*\}\}/gi, params.nome)
+    .replace(/\{\{\s*primeiro_nome\s*\}\}/gi, params.primeiro_nome)
+    .replace(/\{\{\s*data_consulta\s*\}\}/gi, params.data_consulta)
+
 
 const buildProceduresUrl = (patientId: string) => {
   const params = new URLSearchParams()
@@ -329,31 +419,155 @@ runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
 
     if (message?.type === "PATIENTS_FETCH") {
-      const { accessToken, nameFilter, cpfFilter, page, pageSize } = message.payload as PatientsPayload
+      const {
+        accessToken,
+        nameFilter,
+        cpfFilter,
+        filterMode = "none",
+        absenceYears = 0,
+        absenceMonths = 0,
+        nextConsultWeeks = 0,
+        page,
+        pageSize,
+      } = message.payload as PatientsPayload
+
       const safePageSize = Math.min(Math.max(pageSize || 15, 1), 50)
-      const url = buildPatientsUrl(nameFilter, cpfFilter, page || 1, safePageSize)
-      const response = await fetch(url, {
+      const safePage = Math.max(1, page || 1)
+
+      const baseResponse = await fetch(buildPatientsBaseUrl(nameFilter, cpfFilter), {
         headers: {
           apikey: SUPABASE_PUBLISHABLE_KEY,
           Authorization: `Bearer ${accessToken}`,
-          Prefer: "count=exact",
         },
       })
 
-      const text = await response.text()
-      if (!response.ok) {
-        return sendResponse({ ok: false, status: response.status, error: text || `http_${response.status}` })
+      const baseText = await baseResponse.text()
+      if (!baseResponse.ok) {
+        return sendResponse({ ok: false, status: baseResponse.status, error: baseText || `http_${baseResponse.status}` })
       }
 
-      const contentRange = response.headers.get("content-range") || ""
-      const totalRaw = contentRange.split("/")[1]
-      const total = Number.parseInt(totalRaw || "0", 10)
+      type PatientRow = {
+        id: string
+        name: string
+        cpf: string | null
+        phone: string | null
+        city: string | null
+        address: string | null
+        birth_date: string | null
+      }
+
+      type ProcedureRow = {
+        patient_id: string
+        date: string | null
+      }
+
+      let filteredPatients = (JSON.parse(baseText) as PatientRow[]) || []
+
+      const normalizedMode = filterMode || "none"
+      const totalMissingMonths = Math.max(0, Number(absenceYears || 0) * 12 + Number(absenceMonths || 0))
+      const maxWeeks = Math.max(0, Number(nextConsultWeeks || 0))
+
+      const requiresDynamicFilter =
+        (normalizedMode === "no_return" && totalMissingMonths > 0) ||
+        (normalizedMode === "next_scheduled" && maxWeeks > 0) ||
+        normalizedMode === "today_scheduled"
+
+      if (requiresDynamicFilter && filteredPatients.length > 0) {
+        const ids = filteredPatients.map((patient) => patient.id)
+        const procedureSummary = new Map<string, { lastPast: DateParts | null; nextFuture: DateParts | null; hasToday: boolean }>()
+
+        for (const id of ids) {
+          procedureSummary.set(id, { lastPast: null, nextFuture: null, hasToday: false })
+        }
+
+        const today = getTodayInBrasilia()
+        const todayUtcMs = Date.UTC(today.year, today.month - 1, today.day)
+
+        for (const patientIdsChunk of chunk(ids, 120)) {
+          const proceduresResponse = await fetch(buildProceduresByPatientsUrl(patientIdsChunk), {
+            headers: {
+              apikey: SUPABASE_PUBLISHABLE_KEY,
+              Authorization: `Bearer ${accessToken}`,
+            },
+          })
+
+          const proceduresText = await proceduresResponse.text()
+          if (!proceduresResponse.ok) {
+            return sendResponse({
+              ok: false,
+              status: proceduresResponse.status,
+              error: proceduresText || `http_${proceduresResponse.status}`,
+            })
+          }
+
+          const procedures = (JSON.parse(proceduresText) as ProcedureRow[]) || []
+          for (const procedure of procedures) {
+            const summary = procedureSummary.get(procedure.patient_id)
+            if (!summary) continue
+
+            const procedureDate = parseDateParts(procedure.date)
+            if (!procedureDate) continue
+
+            if (procedureDate.key === today.key) {
+              summary.hasToday = true
+            }
+
+            if (procedureDate.key <= today.key) {
+              if (!summary.lastPast || procedureDate.key > summary.lastPast.key) {
+                summary.lastPast = procedureDate
+              }
+              continue
+            }
+
+            if (!summary.nextFuture || procedureDate.key < summary.nextFuture.key) {
+              summary.nextFuture = procedureDate
+            }
+          }
+        }
+
+        if (normalizedMode === "no_return") {
+          filteredPatients = filteredPatients.filter((patient) => {
+            const summary = procedureSummary.get(patient.id)
+            if (!summary?.lastPast) return true
+            return monthsSinceDate(summary.lastPast, today) >= totalMissingMonths
+          })
+        }
+
+        if (normalizedMode === "next_scheduled") {
+          const maxDateUtcMs = todayUtcMs + maxWeeks * 7 * 24 * 60 * 60 * 1000
+
+          filteredPatients = filteredPatients.filter((patient) => {
+            const summary = procedureSummary.get(patient.id)
+            if (!summary?.nextFuture) return false
+            const nextFutureUtcMs = Date.UTC(
+              summary.nextFuture.year,
+              summary.nextFuture.month - 1,
+              summary.nextFuture.day
+            )
+            return nextFutureUtcMs <= maxDateUtcMs
+          })
+        }
+
+        if (normalizedMode === "today_scheduled") {
+          filteredPatients = filteredPatients.filter((patient) => {
+            const summary = procedureSummary.get(patient.id)
+            return Boolean(summary?.hasToday)
+          })
+        }
+      }
+
+      filteredPatients.sort((a, b) => a.name.localeCompare(b.name, "pt-BR"))
+
+      const total = filteredPatients.length
+      const start = (safePage - 1) * safePageSize
+      const end = start + safePageSize
+      const items = filteredPatients.slice(start, end)
 
       return sendResponse({
         ok: true,
         data: {
-          items: JSON.parse(text),
-          total: Number.isFinite(total) ? total : 0,
+          items,
+          total,
         },
       })
     }
@@ -536,14 +750,63 @@ runtime.onMessage.addListener((message, _sender, sendResponse) => {
       const createdRun = (JSON.parse(runText) as Array<Record<string, unknown>>)[0]
       const runId = String(createdRun.id)
 
+      type ProcedureRow = {
+        patient_id: string
+        date: string | null
+      }
+
+      const patientNameById = new Map<string, string>()
+      const nextConsultDateByPatientId = new Map<string, string>()
+      const todayBr = getTodayInBrasilia()
+      const patientIds = (patients || []).map((patient) => patient.id)
+
+      for (const patient of patients || []) {
+        patientNameById.set(patient.id, patient.name || "")
+      }
+
+      for (const patientIdsChunk of chunk(patientIds, 120)) {
+        const proceduresResponse = await fetch(buildProceduresByPatientsUrl(patientIdsChunk), {
+          headers: dispatchHeaders(accessToken),
+        })
+        const proceduresText = await proceduresResponse.text()
+        if (!proceduresResponse.ok) {
+          return sendResponse({
+            ok: false,
+            status: proceduresResponse.status,
+            error: proceduresText || `http_${proceduresResponse.status}`,
+          })
+        }
+
+        const procedures = (JSON.parse(proceduresText) as ProcedureRow[]) || []
+        for (const procedure of procedures) {
+          const procedureDate = parseDateParts(procedure.date)
+          if (!procedureDate) continue
+          if (procedureDate.key < todayBr.key) continue
+
+          const current = nextConsultDateByPatientId.get(procedure.patient_id)
+          if (!current || procedureDate.key < current) {
+            nextConsultDateByPatientId.set(procedure.patient_id, procedureDate.key)
+          }
+        }
+      }
+
       const itemsPayload = (patients || []).map((patient) => {
         const normalizedPhone = normalizePhone(patient.phone)
+        const nome = patientNameById.get(patient.id) || patient.name || ""
+        const primeiro_nome = getFirstName(nome)
+        const data_consulta = formatDateBr(nextConsultDateByPatientId.get(patient.id))
+        const renderedText = renderMessageTemplate(template.content, {
+          nome,
+          primeiro_nome,
+          data_consulta,
+        })
+
         if (!normalizedPhone) {
           return {
             run_id: runId,
             patient_id: patient.id,
             phone: null,
-            rendered_text: template.content,
+            rendered_text: renderedText,
             status: "error",
             attempts: 0,
             error_code: "no_phone",
@@ -555,7 +818,7 @@ runtime.onMessage.addListener((message, _sender, sendResponse) => {
             run_id: runId,
             patient_id: patient.id,
             phone: normalizedPhone,
-            rendered_text: template.content,
+            rendered_text: renderedText,
             status: "error",
             attempts: 0,
             error_code: "invalid_phone",
@@ -566,7 +829,7 @@ runtime.onMessage.addListener((message, _sender, sendResponse) => {
           run_id: runId,
           patient_id: patient.id,
           phone: normalizedPhone,
-          rendered_text: template.content,
+          rendered_text: renderedText,
           status: "pending",
           attempts: 0,
         }

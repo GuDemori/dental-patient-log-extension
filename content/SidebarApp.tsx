@@ -18,19 +18,12 @@ import {
   updateMessage,
 } from "./api"
 import { PAGE_SIZE } from "./constants"
-import { FiltersDropdown } from "./components/FiltersDropdown"
+import { FiltersDropdown, type FiltersValue } from "./components/FiltersDropdown"
 import { LoginForm } from "./components/LoginForm"
 import { MessagesScreen } from "./components/MessagesScreen"
 import { PatientList } from "./components/PatientList"
 import type { DispatchItem, DispatchRunProgress, MessageTemplate, SidebarPatient, SidebarProcedure } from "./types"
 import { backoffDelayMs, randomDelayMs, sendWhatsAppMessage, validatePhoneForSend, waitMs } from "./whatsappDispatch"
-
-type FiltersValue = {
-  name: string
-  document: string
-  absenceYears: string
-  absenceMonths: string
-}
 
 type ProcedureStateMap = Record<string, { status: "loading" | "loaded" | "error"; data: SidebarProcedure[] }>
 
@@ -85,12 +78,17 @@ export const SidebarApp = ({ initialMessage }: SidebarAppProps) => {
   const [totalPatients, setTotalPatients] = useState(0)
   const [page, setPage] = useState(1)
   const [filtersOpen, setFiltersOpen] = useState(false)
-  const [filters, setFilters] = useState<FiltersValue>({
+  const emptyFilters: FiltersValue = {
     name: "",
     document: "",
-    absenceYears: "",
-    absenceMonths: "",
-  })
+    dynamicMode: "none",
+    absenceYears: "1",
+    absenceMonths: "0",
+    nextConsultWeeks: "4",
+  }
+
+  const [draftFilters, setDraftFilters] = useState<FiltersValue>(emptyFilters)
+  const [appliedFilters, setAppliedFilters] = useState<FiltersValue>(emptyFilters)
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
   const [proceduresMap, setProceduresMap] = useState<ProcedureStateMap>({})
   const [messages, setMessages] = useState<MessageTemplate[]>([])
@@ -108,7 +106,7 @@ export const SidebarApp = ({ initialMessage }: SidebarAppProps) => {
     if (!authenticated || screen !== "patients") return
     const timer = window.setTimeout(() => {
       setLoadingPatients(true)
-      fetchPatients(filters.name, filters.document, page)
+      fetchPatients(appliedFilters, page)
         .then((result) => {
           const total = result.total || 0
           const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
@@ -119,7 +117,7 @@ export const SidebarApp = ({ initialMessage }: SidebarAppProps) => {
 
           setPatients(result.items || [])
           setTotalPatients(total)
-          setStatusMessage(result.items?.length ? "" : "Nenhum paciente encontrado.")
+          setStatusMessage(result.items?.length ? "" : "Nenhum paciente encontrado para os filtros aplicados.")
           setExpandedIds((prev) => {
             const next = new Set<string>()
             const ids = new Set((result.items || []).map((item) => item.id))
@@ -147,7 +145,18 @@ export const SidebarApp = ({ initialMessage }: SidebarAppProps) => {
     }, 350)
 
     return () => window.clearTimeout(timer)
-  }, [authenticated, screen, filters.name, filters.document, filters.absenceMonths, filters.absenceYears, page, refreshNonce])
+  }, [
+    authenticated,
+    screen,
+    appliedFilters.name,
+    appliedFilters.document,
+    appliedFilters.dynamicMode,
+    appliedFilters.absenceYears,
+    appliedFilters.absenceMonths,
+    appliedFilters.nextConsultWeeks,
+    page,
+    refreshNonce,
+  ])
 
   useEffect(() => {
     if (!authenticated || screen !== "messages") return
@@ -421,17 +430,21 @@ export const SidebarApp = ({ initialMessage }: SidebarAppProps) => {
         })
         if (batch.length === 0) break
 
-        for (const item of batch) {
+        for (let index = 0; index < batch.length; index += 1) {
+          const item = batch[index]
           if (pauseRequestedRef.current) break
           await processDispatchItem(item)
           if (pauseRequestedRef.current) break
-          const delayMs = randomDelayMs(30_000, 50_000)
-          dispatchLog("info", "run:item-delay", {
-            runId,
-            itemId: item.id,
-            delayMs,
-          })
-          await waitMs(delayMs)
+          const hasNextItemInBatch = index < batch.length - 1
+          if (hasNextItemInBatch) {
+            const delayMs = randomDelayMs(30_000, 50_000)
+            dispatchLog("info", "run:item-delay", {
+              runId,
+              itemId: item.id,
+              delayMs,
+            })
+            await waitMs(delayMs)
+          }
         }
       }
 
@@ -491,7 +504,7 @@ export const SidebarApp = ({ initialMessage }: SidebarAppProps) => {
       const result = await createDispatchRun(
         selectedTemplate.id,
         {
-          filters,
+          filters: appliedFilters,
           page,
           totalPatients,
           source: "current_filtered_batch",
@@ -528,6 +541,20 @@ export const SidebarApp = ({ initialMessage }: SidebarAppProps) => {
     pauseRequestedRef.current = true
   }
 
+  const handleApplyFilters = () => {
+    setPage(1)
+    setAppliedFilters({ ...draftFilters })
+    setRefreshNonce((prev) => prev + 1)
+  }
+
+  const handleClearFilters = () => {
+    setDraftFilters({ ...emptyFilters })
+    setAppliedFilters({ ...emptyFilters })
+    setPage(1)
+    setRefreshNonce((prev) => prev + 1)
+  }
+
+
   if (!authenticated) {
     return <LoginForm errorMessage={statusMessage} onSubmit={handleLogin} />
   }
@@ -558,13 +585,13 @@ export const SidebarApp = ({ initialMessage }: SidebarAppProps) => {
       {screen === "patients" ? (
         <>
           <FiltersDropdown
-            value={filters}
+            value={draftFilters}
             isOpen={filtersOpen}
             onToggle={() => setFiltersOpen((prev) => !prev)}
-            onChange={(next) => {
-              setFilters(next)
-              setPage(1)
-            }}
+            onChange={setDraftFilters}
+            onApply={handleApplyFilters}
+            onClear={handleClearFilters}
+            disabled={loadingPatients}
           />
 
           <div id="dpl-state" className="state" style={{ display: statusMessage || loadingPatients ? "block" : "none" }}>
