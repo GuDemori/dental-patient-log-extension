@@ -1,4 +1,4 @@
-import type { MessageTemplate } from "../types"
+import type { DispatchRunProgress, MessageTemplate } from "../types"
 import { useState } from "react"
 import deleteBlackUrl from "url:../../assets/black-delete.svg"
 import deleteRedUrl from "url:../../assets/red-delete.svg"
@@ -11,6 +11,14 @@ type MessagesScreenProps = {
   onAddMessage: (message: string) => Promise<void>
   onUpdateMessage: (id: string, message: string) => Promise<void>
   onDeleteMessage: (id: string) => Promise<void>
+  dispatchTemplateId: string
+  onDispatchTemplateChange: (templateId: string) => void
+  onStartDispatch: () => Promise<void>
+  onPauseDispatch: () => void
+  dispatchRunning: boolean
+  dispatchBusy: boolean
+  dispatchProgress: DispatchRunProgress | null
+  dispatchError?: string
 }
 
 export const MessagesScreen = ({
@@ -20,6 +28,14 @@ export const MessagesScreen = ({
   onAddMessage,
   onUpdateMessage,
   onDeleteMessage,
+  dispatchTemplateId,
+  onDispatchTemplateChange,
+  onStartDispatch,
+  onPauseDispatch,
+  dispatchRunning,
+  dispatchBusy,
+  dispatchProgress,
+  dispatchError,
 }: MessagesScreenProps) => {
   const [creating, setCreating] = useState(false)
   const [draft, setDraft] = useState("")
@@ -77,6 +93,47 @@ export const MessagesScreen = ({
 
   return (
     <section className="messages-card">
+      <div className="dispatch-card">
+        <div className="dispatch-header">
+          <h4 className="messages-title">Disparo</h4>
+          {dispatchRunning ? (
+            <button className="btn danger" type="button" onClick={onPauseDispatch} disabled={dispatchBusy}>
+              Pausar
+            </button>
+          ) : (
+            <button className="btn" type="button" onClick={() => void onStartDispatch()} disabled={dispatchBusy}>
+              Disparar
+            </button>
+          )}
+        </div>
+        <div className="field">
+          <label className="field-label" htmlFor="dispatch-template-id">
+            Mensagem para disparo
+          </label>
+          <select
+            id="dispatch-template-id"
+            className="field-input"
+            value={dispatchTemplateId}
+            onChange={(event) => onDispatchTemplateChange(event.target.value)}>
+            <option value="">Selecione...</option>
+            {messages.map((template) => (
+              <option value={template.id} key={template.id}>
+                {template.content.slice(0, 80)}
+              </option>
+            ))}
+          </select>
+        </div>
+        {dispatchProgress ? (
+          <div className="dispatch-progress">
+            <span>Total: {dispatchProgress.total}</span>
+            <span>Pendentes: {dispatchProgress.pending}</span>
+            <span>Enviadas: {dispatchProgress.sent}</span>
+            <span>Erro: {dispatchProgress.error}</span>
+          </div>
+        ) : null}
+        {dispatchError ? <p className="messages-empty">{dispatchError}</p> : null}
+      </div>
+
       <div className="messages-header">
         <h3 className="messages-title">Mensagens</h3>
         {!creating ? (
