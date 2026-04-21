@@ -40,6 +40,27 @@ type SidebarAppProps = {
 
 const DISPATCH_SEND_TIMEOUT_MS = 60_000
 const DISPATCH_STATUS_TIMEOUT_MS = 20_000
+const DISPATCH_LOG_PREFIX = "[dpl][dispatch]"
+
+const maskPhoneLog = (value: string | null | undefined) => {
+  const digits = (value || "").replace(/\D/g, "")
+  if (!digits) return "n/a"
+  if (digits.length <= 4) return `***${digits}`
+  return `${"*".repeat(Math.max(0, digits.length - 4))}${digits.slice(-4)}`
+}
+
+const dispatchLog = (level: "info" | "warn" | "error", event: string, data?: Record<string, unknown>) => {
+  const payload = data ? { ...data, ts: new Date().toISOString() } : { ts: new Date().toISOString() }
+  if (level === "error") {
+    console.error(`${DISPATCH_LOG_PREFIX} ${event}`, payload)
+    return
+  }
+  if (level === "warn") {
+    console.warn(`${DISPATCH_LOG_PREFIX} ${event}`, payload)
+    return
+  }
+  console.info(`${DISPATCH_LOG_PREFIX} ${event}`, payload)
+}
 
 const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> => {
   let timer = 0
@@ -257,9 +278,21 @@ export const SidebarApp = ({ initialMessage }: SidebarAppProps) => {
     let lastErrorCode: string | null = null
     let lastErrorMessage = ""
     let lastAttempt = attempts
+    dispatchLog("info", "item:start", {
+      itemId: item.id,
+      patientId: item.patient_id,
+      currentStatus: item.status,
+      currentAttempts: attempts,
+      phone: maskPhoneLog(item.phone),
+    })
 
     for (let attempt = attempts + 1; attempt <= 3; attempt += 1) {
       lastAttempt = attempt
+      dispatchLog("info", "item:attempt-start", {
+        itemId: item.id,
+        attempt,
+        maxAttempts: 3,
+      })
       await withTimeout(
         markDispatchItemStatus({
           itemId: item.id,
@@ -278,12 +311,21 @@ export const SidebarApp = ({ initialMessage }: SidebarAppProps) => {
         | { ok: true }
         | { ok: false; code: "chat-mismatch" | "ui-not-ready" | "invalid-number" | "timeout" | "unknown"; reason: string }
       try {
+        dispatchLog("info", "item:send-call", {
+          itemId: item.id,
+          attempt,
+        })
         sendResult = await withTimeout(
           sendWhatsAppMessage(item.phone || "", item.rendered_text),
           DISPATCH_SEND_TIMEOUT_MS,
           "Timeout ao enviar mensagem no WhatsApp Web."
         )
       } catch (error) {
+        dispatchLog("warn", "item:send-timeout-catch", {
+          itemId: item.id,
+          attempt,
+          reason: (error as Error).message || "timeout",
+        })
         sendResult = {
           ok: false,
           code: "timeout",
@@ -292,6 +334,10 @@ export const SidebarApp = ({ initialMessage }: SidebarAppProps) => {
       }
 
       if (sendResult.ok === true) {
+        dispatchLog("info", "item:send-success", {
+          itemId: item.id,
+          attempt,
+        })
         const sentAt = new Date().toISOString()
         await withTimeout(
           markDispatchItemStatus({
@@ -312,15 +358,38 @@ export const SidebarApp = ({ initialMessage }: SidebarAppProps) => {
       const failedResult = sendResult as { ok: false; code: string; reason: string }
       lastErrorCode = failedResult.code
       lastErrorMessage = failedResult.reason
+      dispatchLog("warn", "item:send-failed", {
+        itemId: item.id,
+        attempt,
+        code: failedResult.code,
+        reason: failedResult.reason,
+      })
 
       if (failedResult.code === "invalid-number" || failedResult.code === "chat-mismatch") {
+        dispatchLog("warn", "item:non-retriable-error", {
+          itemId: item.id,
+          attempt,
+          code: failedResult.code,
+        })
         break
       }
       if (attempt < 3) {
-        await waitMs(backoffDelayMs(attempt))
+        const delayMs = backoffDelayMs(attempt)
+        dispatchLog("info", "item:retry-backoff", {
+          itemId: item.id,
+          attempt,
+          delayMs,
+        })
+        await waitMs(delayMs)
       }
     }
 
+    dispatchLog("warn", "item:final-error-status", {
+      itemId: item.id,
+      attempts: lastAttempt,
+      errorCode: lastErrorCode || "send-failed",
+      errorMessage: lastErrorMessage || "Falha ao enviar mensagem.",
+    })
     await withTimeout(
       markDispatchItemStatus({
         itemId: item.id,
@@ -341,33 +410,60 @@ export const SidebarApp = ({ initialMessage }: SidebarAppProps) => {
     setDispatchBusy(true)
     setDispatchError("")
     pauseRequestedRef.current = false
+    dispatchLog("info", "run:start", { runId })
 
     try {
       while (!pauseRequestedRef.current) {
         const batch = await getDispatchPendingBatch(runId, 20)
+        dispatchLog("info", "run:batch-fetched", {
+          runId,
+          batchSize: batch.length,
+        })
         if (batch.length === 0) break
 
         for (const item of batch) {
           if (pauseRequestedRef.current) break
           await processDispatchItem(item)
           if (pauseRequestedRef.current) break
-          await waitMs(randomDelayMs(30_000, 50_000))
+          const delayMs = randomDelayMs(30_000, 50_000)
+          dispatchLog("info", "run:item-delay", {
+            runId,
+            itemId: item.id,
+            delayMs,
+          })
+          await waitMs(delayMs)
         }
       }
 
       if (pauseRequestedRef.current) {
+        dispatchLog("warn", "run:pause-requested", { runId })
         await pauseDispatchRun(runId)
       } else {
+        dispatchLog("info", "run:finish-completed", { runId })
         await finishDispatchRun(runId, "completed")
       }
       const refreshed = await getDispatchRunProgress(runId)
+      dispatchLog("info", "run:progress-refreshed", {
+        runId,
+        total: refreshed.total,
+        pending: refreshed.pending,
+        sending: refreshed.sending,
+        sent: refreshed.sent,
+        error: refreshed.error,
+        cancelled: refreshed.cancelled,
+      })
       setDispatchProgress(refreshed)
     } catch (error) {
+      dispatchLog("error", "run:failed", {
+        runId,
+        reason: (error as Error).message || "Falha inesperada no disparo.",
+      })
       await finishDispatchRun(runId, "failed")
       setDispatchError((error as Error).message || "Falha inesperada no disparo.")
       const refreshed = await getDispatchRunProgress(runId).catch(() => null)
       if (refreshed) setDispatchProgress(refreshed)
     } finally {
+      dispatchLog("info", "run:finalize", { runId })
       setDispatchRunning(false)
       setDispatchBusy(false)
       pauseRequestedRef.current = false
@@ -387,6 +483,11 @@ export const SidebarApp = ({ initialMessage }: SidebarAppProps) => {
     }
 
     try {
+      dispatchLog("info", "run:create-request", {
+        templateId: selectedTemplate.id,
+        currentPage: page,
+        totalPatientsInView: patients.length,
+      })
       const result = await createDispatchRun(
         selectedTemplate.id,
         {
@@ -405,10 +506,15 @@ export const SidebarApp = ({ initialMessage }: SidebarAppProps) => {
         })
       )
 
+      dispatchLog("info", "run:create-success", {
+        runId: result.run.id,
+        total: result.progress.total,
+      })
       setDispatchProgress(result.progress)
       await runDispatchLoop(result.run.id)
     } catch (error) {
       const reason = (error as Error).message
+      dispatchLog("error", "run:create-failed", { reason })
       if (reason.includes("dispatch_already_running")) {
         setDispatchError("Já existe um disparo em execução.")
         return
@@ -418,6 +524,7 @@ export const SidebarApp = ({ initialMessage }: SidebarAppProps) => {
   }
 
   const handlePauseDispatch = async () => {
+    dispatchLog("warn", "run:pause-clicked")
     pauseRequestedRef.current = true
   }
 
