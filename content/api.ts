@@ -1,5 +1,15 @@
 import { ACCESS_TOKEN_KEY, PAGE_SIZE, REFRESH_TOKEN_KEY, USER_EMAIL_KEY } from "./constants"
-import type { MessageTemplate, PatientsPageResult, SidebarProcedure } from "./types"
+import type {
+  DispatchCreateResult,
+  DispatchItem,
+  DispatchItemStatus,
+  DispatchPatientInput,
+  DispatchRunProgress,
+  DispatchRunStatus,
+  MessageTemplate,
+  PatientsPageResult,
+  SidebarProcedure,
+} from "./types"
 
 const extRuntime: any = globalThis.browser?.runtime ?? chrome.runtime
 
@@ -234,4 +244,130 @@ export const deleteMessage = async (id: string): Promise<void> => {
     }
     throw error
   }
+}
+
+export const createDispatchRun = async (
+  messageTemplateId: string,
+  filtersSnapshot: Record<string, unknown>,
+  patients: DispatchPatientInput[]
+): Promise<DispatchCreateResult> => {
+  const accessToken = getAccessToken()
+  if (!accessToken) throw new Error("not_authenticated")
+
+  try {
+    return await callBackground<DispatchCreateResult>("DISPATCH_CREATE_RUN", {
+      accessToken,
+      messageTemplateId,
+      filtersSnapshot,
+      patients,
+    })
+  } catch (error) {
+    const status = (error as Error & { status?: number }).status
+    if (status === 401 || status === 403) {
+      const refreshed = await refreshSession()
+      if (!refreshed) {
+        clearSession()
+        throw new Error("unauthorized")
+      }
+      const renewedToken = getAccessToken()
+      if (!renewedToken) throw new Error("unauthorized")
+      return await callBackground<DispatchCreateResult>("DISPATCH_CREATE_RUN", {
+        accessToken: renewedToken,
+        messageTemplateId,
+        filtersSnapshot,
+        patients,
+      })
+    }
+    throw error
+  }
+}
+
+export const getDispatchPendingBatch = async (runId: string, limit: number): Promise<DispatchItem[]> => {
+  const accessToken = getAccessToken()
+  if (!accessToken) throw new Error("not_authenticated")
+
+  try {
+    return await callBackground<DispatchItem[]>("DISPATCH_GET_PENDING_BATCH", {
+      accessToken,
+      runId,
+      limit,
+    })
+  } catch (error) {
+    const status = (error as Error & { status?: number }).status
+    if (status === 401 || status === 403) {
+      const refreshed = await refreshSession()
+      if (!refreshed) {
+        clearSession()
+        throw new Error("unauthorized")
+      }
+      const renewedToken = getAccessToken()
+      if (!renewedToken) throw new Error("unauthorized")
+      return await callBackground<DispatchItem[]>("DISPATCH_GET_PENDING_BATCH", {
+        accessToken: renewedToken,
+        runId,
+        limit,
+      })
+    }
+    throw error
+  }
+}
+
+export const markDispatchItemStatus = async (payload: {
+  itemId: string
+  status: DispatchItemStatus
+  attempts?: number
+  errorCode?: string | null
+  errorMessage?: string | null
+  sentAt?: string | null
+}) => {
+  const accessToken = getAccessToken()
+  if (!accessToken) throw new Error("not_authenticated")
+
+  try {
+    await callBackground<{ id: string }>("DISPATCH_MARK_ITEM_STATUS", {
+      accessToken,
+      ...payload,
+    })
+  } catch (error) {
+    const status = (error as Error & { status?: number }).status
+    if (status === 401 || status === 403) {
+      const refreshed = await refreshSession()
+      if (!refreshed) {
+        clearSession()
+        throw new Error("unauthorized")
+      }
+      const renewedToken = getAccessToken()
+      if (!renewedToken) throw new Error("unauthorized")
+      await callBackground<{ id: string }>("DISPATCH_MARK_ITEM_STATUS", {
+        accessToken: renewedToken,
+        ...payload,
+      })
+      return
+    }
+    throw error
+  }
+}
+
+export const pauseDispatchRun = async (runId: string) => {
+  const accessToken = getAccessToken()
+  if (!accessToken) throw new Error("not_authenticated")
+  await callBackground<{ id: string }>("DISPATCH_PAUSE_RUN", { accessToken, runId })
+}
+
+export const resumeDispatchRun = async (runId: string) => {
+  const accessToken = getAccessToken()
+  if (!accessToken) throw new Error("not_authenticated")
+  await callBackground<{ id: string }>("DISPATCH_RESUME_RUN", { accessToken, runId })
+}
+
+export const finishDispatchRun = async (runId: string, status: DispatchRunStatus) => {
+  const accessToken = getAccessToken()
+  if (!accessToken) throw new Error("not_authenticated")
+  await callBackground<{ id: string }>("DISPATCH_FINISH_RUN", { accessToken, runId, status })
+}
+
+export const getDispatchRunProgress = async (runId: string): Promise<DispatchRunProgress> => {
+  const accessToken = getAccessToken()
+  if (!accessToken) throw new Error("not_authenticated")
+  return await callBackground<DispatchRunProgress>("DISPATCH_GET_RUN_PROGRESS", { accessToken, runId })
 }

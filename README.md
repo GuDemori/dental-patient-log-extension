@@ -24,6 +24,32 @@ Extensao Chrome (Manifest V3) para suportar fluxo de mensagens no WhatsApp Web.
 
 - Node.js 20+
 - npm
+- Supabase CLI
+
+## Ambiente local isolado
+
+Esta extensao nao usa URL/chave hardcoded de producao.
+
+1. No projeto principal (`dental-patient-log`), suba o Supabase local:
+
+```bash
+npx supabase start
+```
+
+2. Copie o `.env.example` desta extensao para `.env.local`:
+
+```bash
+cp .env.example .env.local
+```
+
+3. Preencha `PLASMO_PUBLIC_SUPABASE_PUBLISHABLE_KEY` com a `anon key` mostrada em:
+
+```bash
+npx supabase status
+```
+
+Com isso, toda autenticacao e consultas da extensao vao para `http://127.0.0.1:54321` (local).
+Nenhuma escrita e feita no banco de producao.
 
 ## Como rodar (por navegador)
 
